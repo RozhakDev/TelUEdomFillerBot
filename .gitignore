@@ -1,0 +1,31 @@
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ChromeDriver
+chromedriver
+chromedriver.exe
+geckodriver
+geckodriver.log
+
+# Log files
+logs/
+*.log
+
+# IDE / Editor
+.idea/
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Sensitive data
+*.env
