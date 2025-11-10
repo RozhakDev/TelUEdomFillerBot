@@ -67,7 +67,7 @@ def main():
                 logger.info(f"--- Completed survey form {i+1} ---")
 
                 # Pause for debugging...
-                input(">>> Paused. Press Enter to continue to the next form...")
+                # input(">>> Paused. Press Enter to continue to the next form...")
         
         logger.info("All survey pages processed.")
     except KeyboardInterrupt:
