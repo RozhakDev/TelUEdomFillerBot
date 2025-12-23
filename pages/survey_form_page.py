@@ -1,3 +1,5 @@
+import time
+from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -5,131 +7,135 @@ from selenium.common.exceptions import TimeoutException
 
 
 class SurveyFormPage:
-    """Handles the automation logic for filling and submitting EDOM survey forms.
+    """Handles automation for the multi-part EDOM survey form.
 
-    This class is responsible for:
-      - Switching to the correct iframe (if present).
-      - Selecting answers for each question (via radio buttons).
-      - Filling the comment box.
-      - Clicking Save or Submit buttons as needed.
+    This class provides discrete methods to handle the workflow of a multi-page
+    questionnaire. It is designed to be controlled by an external orchestrator
+    (e.g., main.py) which calls its methods in the correct sequence.
 
     Attributes:
-        driver (webdriver.Chrome): The Selenium WebDriver instance used to interact with the browser.
-        logger (logging.Logger): Logger instance for structured output.
-        switched_to_iframe (bool): Tracks whether the driver has switched into an iframe context.
+        driver (webdriver.Chrome): The active Selenium WebDriver instance.
+        logger (logging.Logger): The logger instance for status reporting.
     """
 
     def __init__(self, driver, logger):
         """Initializes the SurveyFormPage object.
 
         Args:
-            driver (webdriver.Chrome): Active Selenium WebDriver instance.
-            logger (logging.Logger): Logger for outputting status and debug information.
+            driver (webdriver.Chrome): The Selenium WebDriver instance.
+            logger (logging.Logger): The logger for outputting status messages.
         """
         self.driver = driver
         self.logger = logger
-        self.switched_to_iframe = False
 
-    def _switch_to_survey_iframe(self):
-        """Switches WebDriver context to the iframe containing the survey form.
+    def click_intermediate_link(self):
+        """Attempts to click the 'start' link on an intermediate page.
 
-        Tries to locate an `<iframe>` tag within 10 seconds.  
-        If found, the driver switches into it and logs success.  
-        If not found, assumes that the form is already on the main page.
+        This function handles an inconsistent workflow where the first survey
+        may require a second click on an intermediate page, while subsequent
+        surveys may not. It attempts to find the link; if found, it is
+        clicked. If not found (TimeoutException), it assumes the driver is
+        already on the correct form page and returns True to allow the main
+        process to continue.
 
-        Raises:
-            TimeoutException: If no iframe is found within the timeout period.
+        Returns:
+            bool: True if the process should continue (i.e., click succeeded
+                  or was gracefully skipped). False for any other unexpected error.
         """
         try:
+            self.logger.info("Searching for a potential intermediate 'start' link...")
+            link_xpath = "//a[.//img[contains(@src, 'kue_blmisi.png')]]"
             wait = WebDriverWait(self.driver, 10)
-            iframe = wait.until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
-            self.driver.switch_to.iframe(iframe)
-            self.switched_to_iframe = True
-            self.logger.info("Switched to survey iframe.")
+            
+            start_link = wait.until(EC.element_to_be_clickable((By.XPATH, link_xpath)))
+            
+            self.logger.info("Found and clicked the intermediate 'start' link.")
+            self.driver.execute_script("arguments[0].click();", start_link)
+            return True
         except TimeoutException:
-            self.logger.warning("Could not find an iframe. Assuming form is on the main page.")
-            self.switched_to_iframe = False
+            self.logger.warning("Intermediate 'start' link not found. Assuming we are already on the form page and proceeding.")
+            return True
+        except Exception as e:
+            self.logger.error(f"An unexpected error occurred trying to click intermediate link: {e}")
+            return False
 
-    def fill_answers(self, comment, radio_index):
-        """Fills out all radio questions and comment box on the EDOM form.
+    def fill_all_visible_answers(self, comment, radio_index):
+        """Fills all radio buttons and the comment box on the current page.
+
+        This method first scrolls the page to ensure all questions are loaded
+        and visible. It then iterates through all radio buttons, selecting the
+        specified answer for each unique question group. It is designed to be
+        called for each part of a multi-page form.
 
         Args:
-            comment (str): Text to input into the comment box (e.g., appreciation message).
-            radio_index (int): Index of the radio button to select per question.  
-                Use `-1` to always select the last (typically 'Sangat Puas') option.
+            comment (str): The text to input into the comment textarea.
+            radio_index (int): The 0-based index for the radio button to select.
+                -1 selects the last option.
 
-        Behavior:
-            1. Switches to the iframe (if exists).
-            2. Locates all radio questions.
-            3. Selects the specified radio option for each question group.
-            4. Fills the comment textarea with the provided message.
-
-        Logs:
-            - Information for each question successfully answered.
-            - Warnings or errors if elements are missing.
+        Returns:
+            bool: True if answers were filled, False if no radio buttons were found.
         """
-        self._switch_to_survey_iframe()
-
         try:
+            self.logger.info("Scrolling page to find all questions...")
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
+
             wait = WebDriverWait(self.driver, 10)
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='radio']")))
-            comment_box = wait.until(EC.presence_of_element_located((By.NAME, "Answer7")))
 
-            radio_questions = self.driver.find_elements(By.CSS_SELECTOR, "input[type='radio']")
-
+            radio_buttons = self.driver.find_elements(By.CSS_SELECTOR, "input[type='radio']")
+            
             processed_questions = set()
-            for question in radio_questions:
-                q_name = question.get_attribute('name')
+            for radio in radio_buttons:
+                q_name = radio.get_attribute('name')
                 if q_name and q_name not in processed_questions:
                     options = self.driver.find_elements(By.NAME, q_name)
                     if options:
-                        target_option = None
-                        if radio_index == -1:
-                            target_option = options[-1]
-                        else:
-                            target_option = options[min(radio_index, len(options)-1)]
-
+                        target_option = options[radio_index] if radio_index != -1 else options[-1]
                         self.driver.execute_script("arguments[0].click();", target_option)
-
-                        self.logger.info(f"Selected option for question '{q_name}'")
                         processed_questions.add(q_name)
+            
+            self.logger.info(f"Completed filling {len(processed_questions)} unique questions on this page.")
 
-            comment_box.send_keys(comment)
-            self.logger.info("Filled comment box.")
+            try:
+                comment_box = self.driver.find_element(By.TAG_NAME, "textarea")
+                comment_box.clear()
+                comment_box.send_keys(comment)
+                self.logger.info("Filled comment box.")
+            except NoSuchElementException:
+                self.logger.info("No comment box found on this page part. Skipping.")
+            
+            return True
         except TimeoutException:
-            self.logger.error("Form elements (radio buttons or comment box) not found. Aborting this form.")
-            if self.switched_to_iframe:
-                self.driver.switch_to.default_content()
+            self.logger.error("No radio buttons found on this page part.")
+            return False
+        except Exception as e:
+            self.logger.error(f"An unexpected error occurred while filling answers: {e}")
+            return False
 
     def click_save_or_submit(self):
-        """Clicks the 'Save' and/or 'Submit' buttons on the survey form.
+        """Finds and clicks a 'Save' or 'Submit' button.
 
-        The method:
-            1. Attempts to click the Save button first (if found).
-            2. Then attempts to click the Submit button.
-            3. If either button is not found, logs a warning instead of throwing.
-
-        After submission, if previously inside an iframe, the driver switches back
-        to the default content.
-
-        Raises:
-            TimeoutException: When buttons are not interactable within 10 seconds.
+        This method prioritizes clicking a 'Save' button first, which is often
+        used to navigate to the next part of a form. If a 'Save' button is not
+        found, it then searches for a 'Submit' button to finalize the form.
         """
         wait = WebDriverWait(self.driver, 10)
+        
         try:
             save_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[contains(@src, 'btn_save2')]")))
             save_btn.click()
-            self.logger.info("Clicked Save button.")
+            self.logger.info("Clicked 'Save' (or 'Next') button.")
+            return
         except TimeoutException:
-            self.logger.warning("Save button was not found or clickable.")
+            self.logger.info("'Save' button not found, looking for 'Submit'.")
 
         try:
             submit_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//input[contains(@src, 'btn_submit')]")))
             submit_btn.click()
-            self.logger.info("Clicked Submit button.")
+            self.logger.info("Clicked 'Submit' button.")
+            return
         except TimeoutException:
-            self.logger.warning("Submit button was not found or clickable.")
-        finally:
-            if self.switched_to_iframe:
-                self.driver.switch_to.default_content()
-                self.logger.info("Switched back to default content.")
+            self.logger.warning("No 'Save' or 'Submit' button was found or clickable.")

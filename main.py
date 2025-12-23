@@ -11,29 +11,28 @@ import config
 def main():
     """Main entry point for the Telkom University EDOM automation script.
 
-    This function orchestrates the complete EDOM automation process:
-      1. Initializes logging and WebDriver.
-      2. Prompts the user to log in manually.
-      3. Handles any unexpected post-login popups.
-      4. Iterates through all survey pages and fills available questionnaires.
-      5. Cleans up WebDriver resources after completion or interruption.
+    This function orchestrates the entire automation process, handling login,
+    navigation, and the multi-step completion of survey forms.
 
-    Workflow:
-        - LoginPage handles manual authentication.
-        - SurveyListPage locates and opens each unfilled survey form.
-        - SurveyFormPage selects answers, fills comments, and submits the form.
+    The script follows a complex sequence for each survey:
+    1.  Navigates to a survey list page.
+    2.  Clicks the initial 'start' link for an available survey.
+    3.  On an intermediate page, clicks a second 'start' link to enter the form.
+    4.  Fills out 'Part 1' of the questionnaire.
+    5.  Clicks a 'Save' button to navigate to 'Part 2'.
+    6.  Fills out 'Part 2' of the questionnaire.
+    7.  Clicks 'Save' again, then clicks the final 'Submit' button.
 
-    Behavior:
-        - The script pauses after each completed form for debugging purposes.
-        - Logs all actions in detail (INFO level by default).
-        - Handles unexpected alerts and browser interruptions gracefully.
+    The script pauses after each fully completed survey to allow for manual
+    verification before proceeding to the next one. It is designed to handle
+    unexpected browser alerts and provides detailed logging for all actions.
 
     Raises:
-        KeyboardInterrupt: When the user manually stops execution (Ctrl+C).
-        Exception: For any unexpected runtime error (with traceback logging).
+        KeyboardInterrupt: If the user presses Ctrl+C to stop the script.
+        Exception: For any unhandled runtime errors during execution.
     """
     logger = setup_logger()
-    driver = None # Initialize driver to None for safe cleanup
+    driver = None
 
     try:
         driver = get_driver()
@@ -61,7 +60,23 @@ def main():
             for i, _ in enumerate(survey_list.click_next_survey_action()):
                 logger.info(f"--- Starting survey form {i+1} on page {url} ---")
 
-                survey_form.fill_answers(config.DEFAULT_COMMENT, config.RADIO_OPTION_INDEX)
+                if not survey_form.click_intermediate_link():
+                    logger.error("Failed to enter form, skipping to next.")
+                    continue
+
+                logger.info("Attempting to fill Part 1...")
+                survey_form.fill_all_visible_answers(config.DEFAULT_COMMENT, config.RADIO_OPTION_INDEX)
+
+                logger.info("Submitting Part 1 to proceed to Part 2...")
+                survey_form.click_save_or_submit()
+                
+                logger.info("Attempting to fill Part 2...")
+                survey_form.fill_all_visible_answers(config.DEFAULT_COMMENT, config.RADIO_OPTION_INDEX)
+
+                logger.info("Clicking 'Save' on Part 2...")
+                survey_form.click_save_or_submit()
+
+                logger.info("Clicking final 'Submit' button...")
                 survey_form.click_save_or_submit()
 
                 logger.info(f"--- Completed survey form {i+1} ---")

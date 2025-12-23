@@ -1,7 +1,8 @@
+import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException
 
 
 class SurveyListPage:
@@ -34,56 +35,47 @@ class SurveyListPage:
         """Navigates the driver to a specific EDOM survey list page.
 
         Args:
-            url (str): The full URL of the survey page to visit (e.g.,
-                `https://igracias.telkomuniversity.ac.id/survey/?pageid=1661`).
-
-        Behavior:
-            - Logs navigation activity.
-            - Performs a direct GET request to the specified URL via Selenium.
-
-        Raises:
-            Exception: If the driver fails to load the page (e.g., due to network errors).
+            url (str): The full URL of the survey page to visit.
         """
         self.logger.info(f"Navigating to survey page: {url}")
         self.driver.get(url)
 
     def click_next_survey_action(self):
-        """Iterates through all 'Start' buttons and yields control for each form to be filled.
+        """
+        Iterates through all 'Start' buttons using a robust clicking mechanism.
 
-        This method searches for survey entries that display the *“Belum Mengisi”*
-        icon (`kue_blmisi.png`) and clicks them one at a time.  
-        After each click, it yields control to the caller, allowing form processing
-        before resuming the search for the next available survey.
-
-        Yields:
-            None: After each 'Start' button click, the method pauses for form handling.
-
-        Behavior:
-            - Continuously searches for the next available 'Start' link.
-            - Clicks and yields after each found instance.
-            - Stops gracefully when no more pending surveys exist.
-
-        Logs:
-            - Discovery of new surveys and each click action.
-            - Informational message when all surveys have been processed.
-
-        Raises:
-            TimeoutException: If no 'Start' button is found within 5 seconds of search.
+        This generator finds each 'start' link, scrolls it into view, and uses
+        a JavaScript click to avoid interception errors. If a click is
+        intercepted, it logs a warning and skips, as commanded.
         """
         start_link_xpath = "//a[.//img[contains(@src, 'kue_blmisi.png')]]"
 
         while True:
             try:
-                start_link = WebDriverWait(self.driver, 5).until(
+                self.logger.info("Searching for the next 'Start' link...")
+                wait = WebDriverWait(self.driver, 15)
+                start_link = wait.until(
                     EC.presence_of_element_located((By.XPATH, start_link_xpath))
                 )
 
-                self.logger.info("Found a 'Start' link. Clicking it.")
+                self.logger.info("Found a 'Start' link. Preparing to click.")
 
-                start_link.click()
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", start_link)
+                time.sleep(1)
+
+                self.driver.execute_script("arguments[0].click();", start_link)
+                self.logger.info("Successfully clicked 'Start' link.")
+                
                 yield
 
-                self.logger.info("Resuming search for the next 'Start' link.")
+                self.logger.info("Resuming search for the next survey.")
+            
+            except ElementClickInterceptedException:
+                self.logger.warning("Click intercepted. Forcing continuation to form filling as commanded.")
+                yield
             except TimeoutException:
-                self.logger.info("No more 'Start' links found on this page. Moving on.")
+                self.logger.info("No more 'Start' links found on this page.")
                 break
+            except Exception as e:
+                self.logger.error(f"An unexpected error occurred during click, but forcing continuation as commanded: {e}")
+                yield
